@@ -1,3 +1,7 @@
+# to use with pypy:
+# 1. install pypy3, e.g. brew install pypy3
+# 2. install constraint, e.g. pip_pypy3 install python-constraint
+
 import os, sys, re, random, time
 import constraint
 
@@ -222,6 +226,9 @@ def constraint_solver(board, rowsums, colsums):
 
           
   solution = problem.getSolution()
+  if solution is None:
+    print("oops! couldn't find a solution.")
+    return
   soln_board = copy_board_trees_only()
   for key,val in sorted(solution.items()):
     if val == 1:
