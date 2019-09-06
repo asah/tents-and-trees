@@ -5,6 +5,7 @@
 import os, sys, re, random, time
 import constraint
 from ortools.sat.python import cp_model
+from ortools.graph import pywrapgraph
 
 SIZE = os.environ.get('SIZE', '10x10').strip()
 WIDTH = int(re.sub('x.+', '', SIZE))
@@ -26,11 +27,11 @@ SOLVER_TIMEOUT = float(os.environ.get('TIMEOUT', '10.0').strip())
 DEBUG = (int(os.environ.get('DEBUG', '1').strip()) == 1)
 DEBUG=False
 
-EMPTY=' '
+EMPTY='~'
 WALL='w'
 TREE='T'
 TENT='t'
-GRASS='_'
+GRASS=' '
 
 BOARD = []
 for y in range(HEIGHT):
@@ -56,29 +57,9 @@ def get_cell(board,y,x):
   if not legal_cell(y,x): return WALL
   return board[y][x]
 
-def neighbors(y,x):
-  neighbors_subboard=[]
-  for dy in range(-1,2):
-    row = []
-    for dx in range(-1,2):
-      row.append(get_cell(board,y+dy,x+dx))
-    neighbors_subboard.append(row)
-  return neighbors_subboard
-
 SQUARE_NEIGHBOR_OFFSETS = [ [-1,0], [0,-1], [0,1], [1,0] ]
 ALL_NEIGHBOR_OFFSETS = [ [-1,-1], [-1,0], [-1,1], [0,-1], [0,1], [1,-1], [1,0], [1,1] ]
 TWOBYTWO_NEIGHBOR_OFFSETS = [ [0,0], [0,1], [1,0], [1,1] ]
-
-def num_empty_neighbors(y,x):
-  """includes cell itself"""
-  return sum([1 if BOARD[y+dy][x+dx] == EMPTY else 0 for dx,dy in SQUARE_NEIGHBOR_OFFSETS])
-
-def neighbors_list(y,x):
-  res = []
-  for col in neighbors(y,x):
-    for row in col:
-      res += row
-  return res
 
 def can_place_tent(board,y,x):
   cell = get_cell(board,y,x)
@@ -120,15 +101,18 @@ def solver_setup(board):
         else: # break not reached i.e. tree not found
           board[y][x] = GRASS
 
-def check_solution_match(board, expected_board):
+def does_solution_match(board, expected_board, print_mismatches=False):
   mismatches = 0
   for y in range(HEIGHT):
     for x in range(WIDTH):
-      if board[y][x] != expected_board[y][x]:
-        print(f"mismatch at {y},{x}: {board[y][x]} vs {expected_board[y][x]}")
+      cell = board[y][x]
+      # ignore mismatches of grass vs empty
+      if (cell == TREE or cell == TENT) and cell != expected_board[y][x]:
+        if print_mismatches:
+          print(f"mismatch at {y},{x}: {board[y][x]} vs {expected_board[y][x]}")
         mismatches += 1
-  if mismatches == 0:
-    print("solution matches expected.")
+  return (mismatches == 0)
+
   
 def check_solution(board, expected_rowsums, expected_colsums):
   numtrees = numtents = 0
@@ -152,10 +136,44 @@ def check_solution(board, expected_rowsums, expected_colsums):
   for x in range(WIDTH):
     if colsums[x] != expected_colsums[x]:
       errors.append(f"error: col {x} has {colsums[x]} trees but expected {expected_colsums[x]}.")
-  if len(errors) == 0:
-    print("solution is valid!")
-  else:
+  if len(errors) != 0:
     print("\n".join(errors))
+
+
+def is_one_tree_per_tent(board):
+  model = cp_model.CpModel()
+  solver = cp_model.CpSolver()
+  tent_for_tree_vars = []
+  tentidx = []
+  cur_tent_idx = 0
+  for y in range(HEIGHT):
+    tentidx.append( [0] * WIDTH )
+    for x in range(WIDTH):
+      if board[y][x] == TENT:
+        tentidx[y][x] = cur_tent_idx
+        cur_tent_idx += 1
+  #print(tentidx)
+  for y in range(HEIGHT):
+    for x in range(WIDTH):
+      if board[y][x] == TREE:
+        # NewIntVarFromDomain wants domains: https://github.com/google/or-tools/blob/master/ortools/sat/python/cp_model.py#L718
+        adjacent_tent_idxs = [tentidx[y+dy][x+dx] for dy,dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, y+dy, x+dx) == TENT]
+        #print(f"tree@{y},{x} adjacent tents = {adjacent_tent_idxs}")
+        adjacent_tents = [ [idx,idx] for idx in adjacent_tent_idxs] # lame/unoptimized
+        tent_for_tree_vars.append(model.NewIntVarFromDomain(
+          cp_model.Domain.FromIntervals(adjacent_tents),
+          't4T'+str(len(tent_for_tree_vars))))
+  model.AddAllDifferent(tent_for_tree_vars)
+  status = solver.Solve(model)
+  if status == cp_model.INFEASIBLE:
+    return False # no need to print - this is the default
+  if status == cp_model.MODEL_INVALID:
+    print("is_one_tree_per_tent: invalid")
+    return False
+  if status == cp_model.UNKNOWN:
+    print("is_one_tree_per_tent: unknown")
+    return False
+  return True
 
 solver_count = 0
 start_time = time.time()
@@ -236,10 +254,35 @@ def constraint_solver(board, rowsums, colsums):
       soln_board[int(ystr)][int(xstr)] = TENT
   print("checking solution...")
   check_solution(soln_board, rowsums, colsums)
-  check_solution_match(soln_board, BOARD)
+  does_solution_match(soln_board, BOARD)
   print_board(soln_board, rowsums, colsums)
 
-def ortools_solver(board, rowsums, colsums):
+class SolutionPrinter(cp_model.CpSolverSolutionCallback):
+  """Print intermediate solutions."""
+
+  def __init__(self, variables, rowsums, colsums):
+    cp_model.CpSolverSolutionCallback.__init__(self)
+    self.__variables = variables
+    self.__solnboards = []
+    self.__rowsums = rowsums
+    self.__colsums = colsums
+
+  def SolutionBoards(self):
+    return self.__solnboards
+
+  def OnSolutionCallback(self):
+    soln_board = copy_board_trees_only()
+    for y in range(HEIGHT):
+      for x in range(WIDTH):
+        if soln_board[y][x] != TREE:
+          soln_board[y][x] = TENT if self.Value(self.__variables[y][x]) == 1 else GRASS
+    self.__solnboards.append(soln_board)
+    print(".", end='', flush=True)
+
+  def SolutionCount(self):
+    return len(self.__solnboards)
+
+def ortools_cpsat_solver(board, rowsums, colsums):
   model = cp_model.CpModel()
   solver = cp_model.CpSolver()
   rowsum_vars = []
@@ -252,31 +295,36 @@ def ortools_solver(board, rowsums, colsums):
   vars = []
   for y in range(HEIGHT):
     vars.append( [None] * WIDTH )
-  # row and column sums must add up
+  trees = []
   for y in range(HEIGHT):
     for x in range(WIDTH):
       if board[y][x] == TREE:
-        for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
-          varname = f"y{y+dy}x{x+dx}"
-          if varname not in vars_added and get_cell(board,y+dy,x+dx) == EMPTY:
-            newvar = vars[y+dy][x+dx] = model.NewIntVar(0, 1, varname)
-            rowsum_vars[y+dy].append(newvar)
-            colsum_vars[x+dx].append(newvar)
-            vars_added[varname] = True            
+        trees.append( (y,x) )
+  # row and column sums must add up
+  for y,x in trees:
+    for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
+      # blank-out rows & columns with zero sums
+      if 0 <= dy+y < HEIGHT and rowsum_vars[dy+y] == 0:
+        continue
+      if 0 <= dx+x < WIDTH and colsum_vars[x+dx] == 0:
+        continue
+      varname = f"y{y+dy}x{x+dx}"
+      if varname not in vars_added and get_cell(board,y+dy,x+dx) == EMPTY:
+        newvar = vars[y+dy][x+dx] = model.NewIntVar(0, 1, varname)
+        rowsum_vars[y+dy].append(newvar)
+        colsum_vars[x+dx].append(newvar)
+        vars_added[varname] = True            
   for y in range(HEIGHT):
     model.Add(sum(rowsum_vars[y]) == rowsums[y])
   for x in range(WIDTH):
     model.Add(sum(colsum_vars[x]) == colsums[x])
-
   # every tree must have at least one tent
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if board[y][x] == TREE:
-        neighbors = []
-        for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
-          if get_cell(board,y+dy,x+dx) == EMPTY:
-            neighbors.append(vars[y+dy][x+dx])
-        model.Add(sum(neighbors) >= 1)
+  for y,x in trees:
+    neighbors = []
+    for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
+      if get_cell(board,y+dy,x+dx) == EMPTY:
+        neighbors.append(vars[y+dy][x+dx])
+    model.Add(sum(neighbors) >= 1)
   # no tent can be adjacent to another tent
   for y in range(HEIGHT):
     for x in range(WIDTH):
@@ -287,7 +335,9 @@ def ortools_solver(board, rowsums, colsums):
             neighbors.append(vars[y+dy][x+dx])
         model.Add(sum(neighbors) <= 1)
 
-  status = solver.Solve(model)
+  callback = SolutionPrinter(vars, rowsums, colsums)
+  solver.parameters.max_time_in_seconds = 10.0
+  status = solver.SearchForAllSolutions(model, callback)
   if status == cp_model.INFEASIBLE:
     print("oops! solver says INFEASIBLE")
     return
@@ -297,19 +347,20 @@ def ortools_solver(board, rowsums, colsums):
   if status == cp_model.UNKNOWN:
     print("oops! solver says UNKNOWN / timeout")
     return
+  print("\n") # end the dots
 
-  soln_board = copy_board_trees_only()
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if vars[y][x] is not None:
-        soln_board[y][x] = TENT if solver.Value(vars[y][x]) == 1 else EMPTY
-  print("checking solution...")
-  print_board(soln_board, rowsums, colsums)
-  check_solution(soln_board, rowsums, colsums)
-  check_solution_match(soln_board, BOARD)
-  
+  for soln_board in callback.SolutionBoards():
+    if not is_one_tree_per_tent(soln_board):
+      print("skipping solution that violates no-sharing...\n")
+      continue
+    if does_solution_match(soln_board, BOARD):
+      print("valid solution, and it matches.")
+    else:
+      print("valid solution, but it doesn't match:")
+      print_board(soln_board, rowsums, colsums)
+      print("expected:")
+      print_board(BOARD, rowsums, colsums)
 
-  
 # place both trees and tents at the same time
 for y in range(HEIGHT):
   for x in range(WIDTH):
@@ -340,6 +391,8 @@ print("running the solver...")
 
 #constraint_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
 
-ortools_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
+ortools_cpsat_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
 
-#check_solution(SOLVER_BOARD, ROWSUMS, COLSUMS)
+#ortools_assignment_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
+
+
