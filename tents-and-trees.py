@@ -209,7 +209,7 @@ def is_one_tree_per_tent(board):
         tentidx[y][x] = cur_tent_idx
         cur_tent_idx += 1
 
-  print_board(board, [' ']*HEIGHT, [' ']*WIDTH)
+  #print_board(board, [' ']*HEIGHT, [' ']*WIDTH)
   for y in range(HEIGHT):
     for x in range(WIDTH):
       if board[y][x] == TREE:
@@ -258,6 +258,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
           soln_board[y][x] = TENT if self.Value(self.__variables[y][x]) == 1 else GRASS
     print(".", end='', flush=True)
     if is_one_tree_per_tent(soln_board):
+      print(" found solution - stopping.")
       self.__solnboards.append(soln_board)
       self.StopSearch()
 
@@ -456,14 +457,14 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       empty_neighbors = []
       for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
         if get_cell(board,y+dy,x+dx) == TENT:
-          print(f"tree@{y},{x} has tent and doesn't need a constraint")
+          print(f"tree@{y},{x} has neighboring tent and doesn't need a constraint")
           break
         if get_cell(board,y+dy,x+dx) == EMPTY:
           empty_neighbors.append(vars[y+dy][x+dx])
       else:
         if len(empty_neighbors) > 0:
           model.Add(sum(empty_neighbors) >= 1)  # ignore if a tent is found
-          print(f"tree@{y},{x} has tent in neighbors: {empty_neighbors}")
+          print(f"tree must be next to tents: {y},{x}: {empty_neighbors} >= 1")
 
   def add_tent_tent_constraints(model, board):
     # no tent can be adjacent to another tent - one tent per 2x2 grid
@@ -473,7 +474,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
                      for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
                      if get_cell(board,y+dy,x+dx) in [EMPTY, TENT] ]
         if len(neighbors) > 1:
-          print(f"1 >= sum({neighbors})")
+          print(f"no tent adjacency: sum({neighbors} <= 1)")
           model.Add(sum(neighbors) <= 1)
 
   add_rowcol_constraints(model, board, rowsums, colsums)
@@ -485,8 +486,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
   solver.parameters.random_seed = int(SEED) if SEED else 1234
   #print(dir(solver.parameters))
   solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH  #FIXED_SEARCH
-  #status = solver.SearchForAllSolutions(model, callback)
-  status = solver.SolveWithSolutionCallback(model, callback)
+  status = solver.SearchForAllSolutions(model, callback)
   if status == cp_model.INFEASIBLE:
     print("oops! solver says INFEASIBLE")
     return
