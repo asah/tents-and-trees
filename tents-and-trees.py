@@ -111,6 +111,13 @@ def is_empty_tripleplus_in_col(board, y, x):
           get_cell(board, y+1, x) == EMPTY and
           get_cell(board, y+2, x) == EMPTY)
 
+def has_empty(board):
+  for y in range(HEIGHT):
+    for x in range(WIDTH):
+      if board[y][x] == EMPTY:
+        return True
+  return False
+
 def compute_sums(board):
   rowsums = [0] * HEIGHT
   colsums = [0] * WIDTH
@@ -208,7 +215,10 @@ def is_one_tree_per_tent(board):
       if board[y][x] == TREE:
         # NewIntVarFromDomain wants domains: https://github.com/google/or-tools/blob/master/ortools/sat/python/cp_model.py#L718
         adjacent_tent_idxs = [tentidx[y+dy][x+dx] for dy,dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, y+dy, x+dx) == TENT]
-        print(f"tree@{y},{x} adjacent tents = {adjacent_tent_idxs}")
+        if len(adjacent_tent_idxs) == 0:
+          print(f"is_one_tree_per_tent: tree@{y},{x} is missing a tent !")
+          return False
+        #print(f"tree@{y},{x} adjacent tents = {adjacent_tent_idxs}")
         adjacent_tents = [ [idx,idx] for idx in adjacent_tent_idxs] # lame/unoptimized
         tent_for_tree_vars.append(model.NewIntVarFromDomain(
           cp_model.Domain.FromIntervals(adjacent_tents),
@@ -216,9 +226,11 @@ def is_one_tree_per_tent(board):
   model.AddAllDifferent(tent_for_tree_vars)
   status = solver.Solve(model)
   if status == cp_model.INFEASIBLE:
-    return False # no need to print - this is the default
+    print("is_one_tree_per_tent: can't match trees and tents")
+    return False
   if status == cp_model.MODEL_INVALID:
     print("is_one_tree_per_tent: invalid")
+    print(model.Validate())
     return False
   if status == cp_model.UNKNOWN:
     print("is_one_tree_per_tent: unknown")
@@ -265,11 +277,6 @@ def ortools_cpsat_solver(board, rowsums, colsums):
   vars = []
   for y in range(HEIGHT):
     vars.append( [None] * WIDTH )
-  trees = []
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if board[y][x] == TREE:
-        trees.append( (y,x) )
 
   print("board after setup:")
   print_board(board, rowsums, colsums)
@@ -403,7 +410,16 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees) or
       accelerator("put grass around tents", grass_around_tents) or
       False)
+  if not has_empty(board) and does_solution_match(board, BOARD, print_mismatches=True):
+    print("success!")
+    sys.exit(0)
   
+  trees = []
+  for y in range(HEIGHT):
+    for x in range(WIDTH):
+      if board[y][x] == TREE:
+        trees.append( (y,x) )
+
   # row and column sums must add up
   for y in range(HEIGHT):
     for x in range(WIDTH):
@@ -415,8 +431,6 @@ def ortools_cpsat_solver(board, rowsums, colsums):
         vars[y][x] = model.NewConstant(1) # NewIntVar(1, 1, varname)
       elif board[y][x] == TREE:
         vars[y][x] = model.NewConstant(0) # NewIntVar(0, 0, varname)
-      rowsum_vars[y].append(vars[y][x])
-      colsum_vars[x].append(vars[y][x])
   print_vars(vars, rowsums, colsums)
 
   #print_board(board, rowsums, colsums)
@@ -424,16 +438,17 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     for y in range(HEIGHT):
       # skip rows with no empty cells
       if sum([1 for x in range(WIDTH) if board[y][x] == EMPTY]) == 0:
-        break
-      print(f"rowsums: {rowsums[y]}=sum({sorted(rowsum_vars[y], key=lambda v: v.Name())}))".replace("..", "-").replace('y','').replace('x',','))
-      model.Add(sum(rowsum_vars[y]) == rowsums[y])
-      break
+        continue
+      rowsum_vars = [vars[y][x] for x in range(WIDTH)]
+      print(f"rowsum[{y}]: {rowsums[y]} = sum({rowsum_vars})")
+      model.Add(rowsums[y] == sum(rowsum_vars))
     for x in range(WIDTH):
       # skip columns with no empty cells
       if sum([1 for y in range(HEIGHT) if board[y][x] == EMPTY]) == 0:
-        break
-      print(f"colsums: {colsums[x]}=sum({sorted(colsum_vars[x], key=lambda v: v.Name())}))".replace("..", "-").replace('y','').replace('x',','))
-      model.Add(sum(colsum_vars[x]) == colsums[x])
+        continue
+      colsum_vars = [vars[y][x] for y in range(HEIGHT)]
+      print(f"colsum[{x}]: {colsums[x]} = sum({colsum_vars})")
+      model.Add(colsums[x] == sum(colsum_vars))
 
   def add_tree_tent_constraints(model, board, trees):
     # every tree must have at least one tent
@@ -441,6 +456,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       empty_neighbors = []
       for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
         if get_cell(board,y+dy,x+dx) == TENT:
+          print(f"tree@{y},{x} has tent and doesn't need a constraint")
           break
         if get_cell(board,y+dy,x+dx) == EMPTY:
           empty_neighbors.append(vars[y+dy][x+dx])
@@ -450,17 +466,15 @@ def ortools_cpsat_solver(board, rowsums, colsums):
           print(f"tree@{y},{x} has tent in neighbors: {empty_neighbors}")
 
   def add_tent_tent_constraints(model, board):
-    # no tent can be adjacent to another tent
+    # no tent can be adjacent to another tent - one tent per 2x2 grid
     for y in range(HEIGHT):
       for x in range(WIDTH):
-        if board[y][x] == EMPTY:
-          neighbors = []
-          for dy,dx in ALL_NEIGHBOR_OFFSETS:
-            if get_cell(board,y+dy,x+dx) in [EMPTY, TENT]:
-              neighbors.append(vars[y+dy][x+dx])
-          if len(neighbors) > 1:
-            print(f"empty@{y},{x} has at most one tent among: {neighbors}")
-            model.Add(sum(neighbors) <= 1)
+        neighbors = [vars[y+dy][x+dx]
+                     for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
+                     if get_cell(board,y+dy,x+dx) in [EMPTY, TENT] ]
+        if len(neighbors) > 1:
+          print(f"1 >= sum({neighbors})")
+          model.Add(sum(neighbors) <= 1)
 
   add_rowcol_constraints(model, board, rowsums, colsums)
   add_tree_tent_constraints(model, board, trees)
@@ -512,6 +526,7 @@ for y in range(HEIGHT):
             if DEBUG:
               print(f"added TREE to {y},{x} and associated tent to {y+dy},{x+dx}")
             break
+
 ROWSUMS, COLSUMS = compute_sums(BOARD)
 check_solution(BOARD, ROWSUMS, COLSUMS)
 print_board(BOARD, ROWSUMS, COLSUMS)
