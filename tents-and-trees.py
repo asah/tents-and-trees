@@ -1,6 +1,5 @@
-# to use with pypy:
-# 1. install pypy3, e.g. brew install pypy3
-# 2. install constraint, e.g. pip_pypy3 install python-constraint
+# to run
+# while [ 1 ]; do BOARD=24x24 python3 tents-and-trees.py > output.txt; status=$?; egrep 'SEED|success|oops' output.txt; if [ $status -ne 0 ]; then break; fi; done
 
 import os, sys, re, random, time
 import constraint
@@ -23,7 +22,8 @@ if DENSITY < 0.1 or DENSITY > 1.0:
 # todo: using alarm() to apply timeout to solvers
 SOLVER_TIMEOUT = float(os.environ.get('TIMEOUT', '100.0').strip())
 
-SEED = os.environ.get('SEED', None)
+SEED = os.environ.get('SEED', random.randint(0, 9999999))
+print(f"SEED={SEED}")
 random.seed(SEED)
 
 DEBUG = (int(os.environ.get('DEBUG', '1').strip()) == 1)
@@ -304,8 +304,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     if func(board, rowsums, colsums):
       print(f"board after accelerator ({100.0*frac_filled(board):.1f}%): {msg}")
       print_board(board, rowsums, colsums)
-      if not does_solution_match(board, BOARD, rowsums, colsums, True, True):
-        sys.exit(0)
+      does_solution_match(board, BOARD, rowsums, colsums, True, True)
       return True
     print(f"no change after accelerator: {msg}")
     return False
@@ -457,8 +456,14 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees) or
       accelerator("put grass around tents", grass_around_tents) or
       False)
-  if not has_empty(board) and does_solution_match(board, BOARD, rowsums, colsums, print_mismatches=True):
-    print("success! (matches)")
+  if not has_empty(board):
+    if not is_one_tree_per_tent(board):
+      print("error! after acceleraor - is_one_tree_per_tent(board) == False")
+      sys.exit(1)
+    if does_solution_match(board, BOARD, rowsums, colsums, print_mismatches=True):
+      print("success! after acceleraor - and it matches")
+      sys.exit(0)
+    print("success! after acceleraor - but it doesn't match (new solution)")
     sys.exit(0)
   
   trees = []
@@ -552,12 +557,14 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       print("skipping solution that violates no-sharing...\n")
       continue
     if does_solution_match(soln_board, BOARD, rowsums, colsums):
-      print("valid solution, and it matches.")
+      print("success! valid solution, and it matches.")
+      sys.exit(0)
     else:
-      print("valid solution, but it doesn't match:")
+      print("success! valid solution, but it doesn't match (new solution)...")
       print_board(soln_board, rowsums, colsums)
       print("expected:")
       print_board(BOARD, rowsums, colsums)
+      sys.exit(0)
 
 # place both trees and tents at the same time
 for y in range(HEIGHT):
