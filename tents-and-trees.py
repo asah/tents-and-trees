@@ -22,7 +22,7 @@ if DENSITY < 0.1 or DENSITY > 1.0:
 # todo: using alarm() to apply timeout to solvers
 SOLVER_TIMEOUT = float(os.environ.get('TIMEOUT', '100.0').strip())
 
-SEED = os.environ.get('SEED', random.randint(0, 9999999))
+SEED = int(os.environ.get('SEED', random.randint(0, 9999999)))
 print(f"SEED={SEED}")
 random.seed(SEED)
 
@@ -95,8 +95,11 @@ def is_empty_single_in_row(board, y, x):
 def is_empty_double_in_row(board, y, x):
   return is_empty_n_in_row(board, y, x, 2)
 
-def is_empty_tripquad_in_row(board, y, x):
-  return is_empty_n_in_row(board, y, x, 3) or is_empty_n_in_row(board, y, x, 4)
+def is_empty_triple_in_row(board, y, x):
+  return is_empty_n_in_row(board, y, x, 3)
+
+def is_empty_quad_in_row(board, y, x):
+  return is_empty_n_in_row(board, y, x, 4)
 
 def is_empty_fiveplus_in_row(board, y, x):
   return is_empty_n_in_row(board, y, x, 5, bounded=False)
@@ -116,9 +119,11 @@ def is_empty_single_in_col(board, y, x):
 def is_empty_double_in_col(board, y, x):
   return is_empty_n_in_col(board, y, x, 2)
 
-def is_empty_tripquad_in_col(board, y, x):
-  # start of multiple-empty run only, i.e. behind us is NOT empty!
-  return is_empty_n_in_col(board, y, x, 3) or is_empty_n_in_col(board, y, x, 4)
+def is_empty_triple_in_col(board, y, x):
+  return is_empty_n_in_col(board, y, x, 3)
+
+def is_empty_quad_in_col(board, y, x):
+  return is_empty_n_in_col(board, y, x, 4)
 
 def is_empty_fiveplus_in_col(board, y, x):
   return is_empty_n_in_col(board, y, x, 5, bounded=False)
@@ -141,10 +146,14 @@ def compute_sums(board):
   return rowsums, colsums
 
 def print_board(board, rowsums, colsums):
-  print(f"      {' '.join([str(x%10) for x in range(WIDTH)])}")
-  print(f"      {' '.join([str(x) for x in colsums])}")
+  colnums = ''.join([f"{x%10}" for x in range(WIDTH)])
+  print(f"cols:   {colnums}")
+  colsumvals = ''.join([f"{int(x/10)}".replace('0',' ') for x in colsums])
+  print(f"sum*10: {colsumvals}")
+  colsumvals = ''.join([f"{x%10}" for x in colsums])
+  print(f"sum* 1: {colsumvals}")
   for i, y in enumerate(range(HEIGHT)):
-    print(f"{i:>2} {rowsums[y]:>2} {''.join([str(x)+' ' for x in board[y]])}")
+    print(f"{i:>4} {rowsums[y]:>2} {''.join([str(x) for x in board[y]])}")
   print("")
 
 def print_vars(vars_array, rowsums, colsums):
@@ -311,25 +320,24 @@ def ortools_cpsat_solver(board, rowsums, colsums):
 
   def place_grass(board, y, x, msg=None):
     board[y][x] = GRASS
-    print(f"placed grass on {y},{x}{(': '+msg) if msg else ''}")
+    print(f"placed grass on {y:2},{x:2}{(': '+msg) if msg else ''}")
     does_solution_match(board, BOARD, rowsums, colsums, True, True)
     return True
   def place_tent(board, y, x, msg=None):
     board[y][x] = TENT
-    print(f"placed tent on {y},{x}{(': '+msg) if msg else ''}")
+    print(f"placed  tent on {y:2},{x:2}{(': '+msg) if msg else ''}")
     does_solution_match(board, BOARD, rowsums, colsums, True, True)
     grass_around_tent(board, y, x)
     return True
 
-  def grass_on_zero_remaining(board, rowsums, colsums):
-    changed = False
+  def grass_on_zero_remaining(board, rowsums, colsums, changed=False):
     for y in range(HEIGHT):
       for x in range(WIDTH):
         if board[y][x] != EMPTY: continue
         if colsums[x] == 0:
-          changed = place_grass(board, y, x, f"grass_on_zero_remaining: colsum[{x}]=0")
+          changed |= place_grass(board, y, x, f"grass_on_zero_remaining: colsum[{x}]=0")
         if rowsums[y] == 0:
-          changed = place_grass(board, y, x, f"grass_on_zero_remaining: rowsum[{y}]=0")
+          changed |= place_grass(board, y, x, f"grass_on_zero_remaining: rowsum[{y}]=0")
     # if no remaining, then grass over remaining cells in the row
     for y in range(HEIGHT):
       numtents = 0
@@ -339,7 +347,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       if numtents == rowsums[y]:
         for x in range(WIDTH):
           if board[y][x] == EMPTY:
-            changed = place_grass(board, y, x, f"grass_on_zero_remaining: numtents={numtents} rowsum[{y}]={rowsums[y]}")
+            changed |= place_grass(board, y, x, f"grass_on_zero_remaining: numtents={numtents} rowsum[{y}]={rowsums[y]}")
     # if no remaining, then grass over remaining cells in the column
     for x in range(WIDTH):
       numtents = 0
@@ -349,13 +357,53 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       if numtents == colsums[x]:
         for y in range(HEIGHT):
           if board[y][x] == EMPTY:
-            changed = place_grass(board, y, x, f"grass_on_zero_remaining: numtents={numtents} colsum[{x}]={colsums[x]}")
+            changed |= place_grass(board, y, x, f"grass_on_zero_remaining: numtents={numtents} colsum[{x}]={colsums[x]}")
     return changed
 
-  def fill_singles_if_sums_match(board, rowsums, columns):
-    changed = False
+  def grass_around_trees_with_assigned_tents(board, rowsums, columns, changed=False):
+    # SEED=9860347 SIZE=24x24
+    # placed grass on 12, 0: grassing around assigned tree @13,0
+    # placed grass on 20, 0: grassing around assigned tree @21,0
     for y in range(HEIGHT):
-      empty_singles, empty_doubles, empty_tripquads, tents = [], [], [], []
+      for x in range(WIDTH):
+        if board[y][x] != TREE:
+          break
+        tent_neighbors = [[y+dy,x+dx] for dy,dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, y+dy, x+dx) == TENT]
+        if len(tent_neighbors) != 1:
+          break
+        for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
+          if get_cell(board, y+dy, x+dx) != EMPTY:
+            continue
+          empty_cell = [y+dy, x+dx]
+          if 1 == sum([1 for _dy,_dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, empty_cell[0]+_dy, empty_cell[1]+_dx) in [TREE, TENT]]):
+            changed |= place_grass(board, empty_cell[0], empty_cell[1], f"grassing around assigned tree @{y},{x}")
+    return changed
+          
+  def grass_on_right_angles(board, rowsums, columns, changed=False):
+    for y in range(HEIGHT):
+      for x in range(WIDTH):
+        if board[y][x] == TREE:
+          if (get_cell(board, y, x-1) == EMPTY and get_cell(board, y-1, x) == EMPTY and \
+              get_cell(board, y, x+1) != EMPTY and get_cell(board, y+1, x) != EMPTY and \
+              get_cell(board, y-1, x-1) == EMPTY):
+            changed |= place_grass(board, y-1, x-1, f"grass_on_right_angles upper-left tent@{y},{x} vs adj empties at {y},{x-1} and {y-1},{x}")
+          if (get_cell(board, y-1, x) == EMPTY and get_cell(board, y, x+1) == EMPTY and \
+              get_cell(board, y+1, x) != EMPTY and get_cell(board, y, x-1) != EMPTY and \
+              get_cell(board, y-1, x+1) == EMPTY):
+            changed |= place_grass(board, y-1, x+1, f"grass_on_right_angles upper-right tent@{y},{x} vs adj empties at {y},{x-1} and {y-1},{x}")
+          if (get_cell(board, y, x+1) == EMPTY and get_cell(board, y+1, x) == EMPTY and \
+              get_cell(board, y, x-1) != EMPTY and get_cell(board, y-1, x) != EMPTY and \
+              get_cell(board, y+1, x+1) == EMPTY):
+            changed |= place_grass(board, y+1, x+1, f"grass_on_right_angles lower-right tent@{y},{x} vs adj empties at {y},{x-1} and {y-1},{x}")
+          if (get_cell(board, y+1, x) == EMPTY and get_cell(board, y, x-1) == EMPTY and \
+              get_cell(board, y-1, x) != EMPTY and get_cell(board, y, x+1) != EMPTY and \
+              get_cell(board, y+1, x-1) == EMPTY):
+            changed |= place_grass(board, y+1, x-1, f"grass_on_right_angles lower-left tent@{y},{x} vs adj empties at {y},{x-1} and {y-1},{x}")
+    return changed
+
+  def fill_singles_if_sums_match(board, rowsums, columns, changed=False):
+    for y in range(HEIGHT):
+      empty_singles, empty_doubles, empty_triples, empty_quads, tents = [], [], [], [], []
       for x in range(WIDTH):
         if board[y][x] == TENT:
           tents.append(x)
@@ -363,30 +411,39 @@ def ortools_cpsat_solver(board, rowsums, colsums):
           empty_singles.append(x)
         elif is_empty_double_in_row(board, y, x):
           empty_doubles.append(x)
-        elif is_empty_tripquad_in_row(board, y, x):
-          empty_tripquads.append(x)
+        elif is_empty_triple_in_row(board, y, x):
+          empty_triples.append(x)
+        elif is_empty_quad_in_row(board, y, x):
+          empty_quads.append(x)
         elif is_empty_fiveplus_in_row(board, y, x):
           break
       else:
-        if len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_tripquads) == rowsums[y]:
+        if len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == rowsums[y]:
           for x in empty_singles:
-            if board[y][x] == EMPTY:
-              changed = place_tent(board, y, x, f"fill_singles_if_sums_match @{y},{x}")
-          if changed:
-            #print_board(board, rowsums, colsums)
-            print(f"fill singles by row: y={y} singles={empty_singles} dbls={empty_doubles} tripquads=2*{empty_tripquads} sum={rowsums[y]} ")
-        elif len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_tripquads) == rowsums[y] + 1:
-          print(f"fill adjacents by row: y={y} singles={empty_singles} dbls={empty_doubles} tripquads=2*{empty_tripquads} sum={rowsums[y]} ")
+            changed |= place_tent(board, y, x, f"fill_singles_if_sums_match (single-row) @{y},{x}")
+          for x in empty_triples:
+            changed |= place_tent(board, y, x+2, f"fill_singles_if_sums_match (triple-row) @{y},{x+2}")
+          for x in empty_doubles:
+            for dy,dx in [ [-1,0], [1,0], [-1,1], [1,1] ]: # squares around the double
+              if get_cell(board, y+dy, x+dx) == EMPTY:
+                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-doubles in row @{y}")
+          for x in empty_triples:
+            for dy,dx in [ [-1,1], [1,1] ]: # squares around the center of the triple
+              if get_cell(board, y+dy, x+dx) == EMPTY:
+                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in row @{y}")
+          #print_board(board, rowsums, colsums)
+          if changed: print(f"fill singles by row: y={y} singles={empty_singles} dbls={empty_doubles} trips=2*{empty_triples} quads=2*{empty_quads} sum={rowsums[y]} ")
+        elif len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == rowsums[y] + 1:           
           # one extra single/double - shoot out neighbors...
           for i in range(len(empty_singles) - 1):
             if empty_singles[i+1] - empty_singles[i] == 2:  # g g g  <= grass
               if get_cell(board, y-1, empty_singles[i]+1) == EMPTY:
-                changed = place_grass(board, y-1, empty_singles[i]+1, f"fill adjacent-to-singles in row @{y}")
+                changed |= place_grass(board, y-1, empty_singles[i]+1, f"fill adjacent-to-singles in row @{y}")
               if get_cell(board, y+1, empty_singles[i]+1) == EMPTY:
-                changed = place_grass(board, y+1, empty_singles[i]+1, f"fill adjacent-to-singles in row @{y}")
+                changed |= place_grass(board, y+1, empty_singles[i]+1, f"fill adjacent-to-singles in row @{y}")
     #if changed: print_board(board, rowsums, colsums)
     for x in range(HEIGHT):
-      empty_singles, empty_doubles, empty_tripquads, tents = [], [], [], []
+      empty_singles, empty_doubles, empty_triples, empty_quads, tents = [], [], [], [], []
       for y in range(WIDTH):
         if board[y][x] == TENT:
           tents.append(y)
@@ -394,44 +451,54 @@ def ortools_cpsat_solver(board, rowsums, colsums):
           empty_singles.append(y)
         elif is_empty_double_in_col(board, y, x):
           empty_doubles.append(y)
-        elif is_empty_tripquad_in_col(board, y, x):
-          empty_tripquads.append(y)
+        elif is_empty_triple_in_col(board, y, x):
+          empty_triples.append(y)
+        elif is_empty_quad_in_col(board, y, x):
+          empty_quads.append(y)
         elif is_empty_fiveplus_in_col(board, y, x):
           break
       else:
-        if len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_tripquads) == colsums[x]:
+        if len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == colsums[x]:
           for y in empty_singles:
-            if board[y][x] == EMPTY:
-              changed = place_tent(board, y, x, f"fill_singles_if_sums_match @{y},{x}")
-          if changed: print(f"fill singles by col: x={x} singles={empty_singles} dbls={empty_doubles} tripquads=2*{empty_tripquads} sum={colsums[x]} ")
-        elif len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_tripquads) == colsums[x] + 1:
+            changed |= place_tent(board, y, x, f"fill_singles_if_sums_match (single-col) @{y},{x}")
+          for y in empty_triples:
+            changed |= place_tent(board, y+2, x, f"fill_singles_if_sums_match (triple-col) @{y},{x}")
+          for y in empty_doubles:
+            for dy,dx in [ [0,-1], [0,1], [1,-1], [1,1] ]: # squares around the double
+              if get_cell(board, y+dy, x+dx) == EMPTY:
+                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-doubles in col @{x}")
+          for y in empty_triples:
+            for dy,dx in [ [-1,1], [1,1] ]: # squares around the center of the triple
+              if get_cell(board, y+dy, x+dx) == EMPTY:
+                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in col @{x}")
+          #if len(empty_triples)>0: print_board(board, rowsums, colsums)
+          if changed: print(f"fill singles by col: x={x} singles={empty_singles} dbls={empty_doubles} trips=2*{empty_triples} quads=2*{empty_quads} sum={colsums[x]} ")
+        elif len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == colsums[x] + 1:
           # one extra single/double - shoot out neighbors...
           for i in range(len(empty_singles) - 1):
             if empty_singles[i+1] - empty_singles[i] == 2:  # g g g  <= grass
               if get_cell(board, empty_singles[i]+1, x-1) == EMPTY:
-                changed = place_grass(board, empty_singles[i]+1, x-1, f"fill adjacent-to-singles for empty in {empty_singles[i]},{x}")
+                changed |= place_grass(board, empty_singles[i]+1, x-1, f"fill adjacent-to-singles for empty in {empty_singles[i]},{x}")
               if get_cell(board, empty_singles[i]+1, x+1) == EMPTY:
-                changed = place_grass(board, empty_singles[i]+1, x+1, f"fill adjacent-to-singles for empty in {empty_singles[i]},{x}")
+                changed |= place_grass(board, empty_singles[i]+1, x+1, f"fill adjacent-to-singles for empty in {empty_singles[i]},{x}")
     #if changed: print_board(board, rowsums, colsums)
     return changed
 
-  def grass_around_tent(board, y, x):
-    changed = False
+  def grass_around_tent(board, y, x, changed=False):
     for dy,dx in ALL_NEIGHBOR_OFFSETS:
       if get_cell(board,y+dy,x+dx) == EMPTY:
-        changed = place_grass(board, y+dy, x+dx, f"grass_around_tent at {y},{x}")
+        changed |= place_grass(board, y+dy, x+dx, f"grass_around_tent at {y:2},{x:2}")
     return changed
 
-  def grass_around_tents(board, rowsums, columns):
-    changed = False
+  def grass_around_tents(board, rowsums, columns, changed=False):
     for y in range(HEIGHT):
       for x in range(WIDTH):
         if board[y][x] == TENT:
-          changed = grass_around_tent(board, y, x)
+          changed |= grass_around_tent(board, y, x)
     return changed
 
-  def place_tent_next_to_lonely_trees(board, rowsums, columns):
-    changed = False
+  def place_tent_next_to_lonely_trees(board, rowsums, columns, changed=False):
+    # lonely = one empty cell available = empty must be a tent
     for y in range(HEIGHT):
       for x in range(WIDTH):
         if board[y][x] == TREE:
@@ -445,17 +512,20 @@ def ortools_cpsat_solver(board, rowsums, colsums):
               empty_cell = [y+dy, x+dx]
           else: # for-loop fell through i.e. one empty cell
             if empty_cell is not None:
-              changed = place_tent(board, empty_cell[0], empty_cell[1])
+              changed |= place_tent(board, empty_cell[0], empty_cell[1], f"place tent next to lonely trees")
     return changed
 
-  changed = True
-  while changed:
-    changed = (
-      accelerator("put grass on cells with zero remaining", grass_on_zero_remaining) or
-      accelerator("fill singles if count matches rowsums", fill_singles_if_sums_match) or
-      accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees) or
-      accelerator("put grass around tents", grass_around_tents) or
-      False)
+  while True:
+    if not ( # changed...
+        accelerator("put grass on cells with zero remaining", grass_on_zero_remaining) or
+        accelerator("fill singles if count matches rowsums", fill_singles_if_sums_match) or
+        accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees) or
+        accelerator("put grass around tents", grass_around_tents) or
+        accelerator("grass in the diagonal of a tree with right-angle empties", grass_on_right_angles) or
+        accelerator("grass around assigned tents", grass_around_trees_with_assigned_tents) or
+        False):
+      break
+
   if not has_empty(board):
     if not is_one_tree_per_tent(board):
       print("error! after acceleraor - is_one_tree_per_tent(board) == False")
