@@ -22,6 +22,8 @@ if DENSITY < 0.1 or DENSITY > 1.0:
 # todo: using alarm() to apply timeout to solvers
 SOLVER_TIMEOUT = float(os.environ.get('TIMEOUT', '100.0').strip())
 
+DBG_CONSTRAINT = int(os.environ.get('DBG_CONSTRAINT', '0'))
+
 SEED = int(os.environ.get('SEED', random.randint(0, 9999999)))
 print(f"SEED={SEED}")
 random.seed(SEED)
@@ -185,7 +187,8 @@ def does_solution_match(board, expected_board, rowsums, colsums, print_mismatche
     for x in range(WIDTH):
       cell = board[y][x]
       # ignore mismatches of grass vs empty
-      if cell in [TREE, TENT] and cell != expected_board[y][x]:
+      if (cell in [TREE, TENT] and cell != expected_board[y][x]) or \
+         (cell == GRASS and expected_board[y][x] == TENT):
         if print_mismatches:
           print(f"mismatch at {y},{x}: {board[y][x]} vs {expected_board[y][x]}")
           print_board(board, rowsums, colsums)
@@ -368,9 +371,15 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       for x in range(WIDTH):
         if board[y][x] != TREE:
           break
+        # tree must have exactly one tent neighbor (TODO: remove this limitation?)
         tent_neighbors = [[y+dy,x+dx] for dy,dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, y+dy, x+dx) == TENT]
         if len(tent_neighbors) != 1:
           break
+        # neighboring tent cannot have other trees next to it (n=2+) - could be assigned to that
+        tent_neighbor = tent_neighbors[0]
+        if 1 != sum([1 for _dy,_dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, tent_neighbor[0]+_dy, tent_neighbor[1]+_dx) == TREE]):
+          break
+        # neighboring empty cells cannot have neighboring tents or trees
         for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
           if get_cell(board, y+dy, x+dx) != EMPTY:
             continue
@@ -419,20 +428,18 @@ def ortools_cpsat_solver(board, rowsums, colsums):
           break
       else:
         if len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == rowsums[y]:
+          localchg = False
           for x in empty_singles:
-            changed |= place_tent(board, y, x, f"fill_singles_if_sums_match (single-row) @{y},{x}")
+            localchg |= place_tent(board, y, x, f"fill_singles_if_sums_match (single-row) @{y},{x}")
           for x in empty_triples:
-            changed |= place_tent(board, y, x+2, f"fill_singles_if_sums_match (triple-row) @{y},{x+2}")
+            localchg |= place_tent(board, y, x+2, f"fill_singles_if_sums_match (triple-row) @{y},{x+2}")
           for x in empty_doubles:
             for dy,dx in [ [-1,0], [1,0], [-1,1], [1,1] ]: # squares around the double
               if get_cell(board, y+dy, x+dx) == EMPTY:
-                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-doubles in row @{y}")
-          for x in empty_triples:
-            for dy,dx in [ [-1,1], [1,1] ]: # squares around the center of the triple
-              if get_cell(board, y+dy, x+dx) == EMPTY:
-                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in row @{y}")
+                localchg |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-doubles in row @{y}")
+          changed |= localchg
           #print_board(board, rowsums, colsums)
-          if changed: print(f"fill singles by row: y={y} singles={empty_singles} dbls={empty_doubles} trips=2*{empty_triples} quads=2*{empty_quads} sum={rowsums[y]} ")
+          if localchg: print(f"fill by row: y={y} singles={empty_singles} dbls={empty_doubles} trips=2*{empty_triples} quads=2*{empty_quads} tents={tents} sum={rowsums[y]} ")
         elif len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == rowsums[y] + 1:           
           # one extra single/double - shoot out neighbors...
           for i in range(len(empty_singles) - 1):
@@ -441,6 +448,10 @@ def ortools_cpsat_solver(board, rowsums, colsums):
                 changed |= place_grass(board, y-1, empty_singles[i]+1, f"fill adjacent-to-singles in row @{y}")
               if get_cell(board, y+1, empty_singles[i]+1) == EMPTY:
                 changed |= place_grass(board, y+1, empty_singles[i]+1, f"fill adjacent-to-singles in row @{y}")
+          for x in empty_triples:
+            for dy,dx in [ [-1,1], [1,1] ]: # squares around the center of the triple
+              if get_cell(board, y+dy, x+dx) == EMPTY:
+                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in row @{y}")
     #if changed: print_board(board, rowsums, colsums)
     for x in range(HEIGHT):
       empty_singles, empty_doubles, empty_triples, empty_quads, tents = [], [], [], [], []
@@ -459,8 +470,10 @@ def ortools_cpsat_solver(board, rowsums, colsums):
           break
       else:
         if len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == colsums[x]:
+          print_board(board, rowsums, colsums)
           for y in empty_singles:
             changed |= place_tent(board, y, x, f"fill_singles_if_sums_match (single-col) @{y},{x}")
+          print_board(board, rowsums, colsums)
           for y in empty_triples:
             changed |= place_tent(board, y+2, x, f"fill_singles_if_sums_match (triple-col) @{y},{x}")
           for y in empty_doubles:
@@ -472,7 +485,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
               if get_cell(board, y+dy, x+dx) == EMPTY:
                 changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in col @{x}")
           #if len(empty_triples)>0: print_board(board, rowsums, colsums)
-          if changed: print(f"fill singles by col: x={x} singles={empty_singles} dbls={empty_doubles} trips=2*{empty_triples} quads=2*{empty_quads} sum={colsums[x]} ")
+          if changed: print(f"fill by col: x={x} singles={empty_singles} dbls={empty_doubles} trips=2*{empty_triples} quads=2*{empty_quads} tents={tents} sum={colsums[x]} ")
         elif len(tents) + len(empty_singles) + len(empty_doubles) + 2*len(empty_triples) + 2*len(empty_quads) == colsums[x] + 1:
           # one extra single/double - shoot out neighbors...
           for i in range(len(empty_singles) - 1):
@@ -481,6 +494,10 @@ def ortools_cpsat_solver(board, rowsums, colsums):
                 changed |= place_grass(board, empty_singles[i]+1, x-1, f"fill adjacent-to-singles for empty in {empty_singles[i]},{x}")
               if get_cell(board, empty_singles[i]+1, x+1) == EMPTY:
                 changed |= place_grass(board, empty_singles[i]+1, x+1, f"fill adjacent-to-singles for empty in {empty_singles[i]},{x}")
+          for y in empty_triples:
+            for dy,dx in [ [1,-1], [1,1] ]: # squares around the center of the triple
+              if get_cell(board, y+dy, x+dx) == EMPTY:
+                changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in col @{x}")
     #if changed: print_board(board, rowsums, colsums)
     return changed
 
@@ -528,20 +545,14 @@ def ortools_cpsat_solver(board, rowsums, colsums):
 
   if not has_empty(board):
     if not is_one_tree_per_tent(board):
-      print("error! after acceleraor - is_one_tree_per_tent(board) == False")
+      print("error! after accelerator - is_one_tree_per_tent(board) == False")
       sys.exit(1)
     if does_solution_match(board, BOARD, rowsums, colsums, print_mismatches=True):
-      print("success! after acceleraor - and it matches")
+      print("success! after accelerator - and it matches")
       sys.exit(0)
-    print("success! after acceleraor - but it doesn't match (new solution)")
+    print("success! after accelerator - but it doesn't match (new solution)")
     sys.exit(0)
   
-  trees = []
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if board[y][x] == TREE:
-        trees.append( (y,x) )
-
   # row and column sums must add up
   for y in range(HEIGHT):
     for x in range(WIDTH):
@@ -557,57 +568,74 @@ def ortools_cpsat_solver(board, rowsums, colsums):
 
   #print_board(board, rowsums, colsums)
   def add_rowcol_constraints(model, board, rowsums, colsums):
+    num_constraints = 0
     for y in range(HEIGHT):
       # skip rows with no empty cells
       if sum([1 for x in range(WIDTH) if board[y][x] == EMPTY]) == 0:
         continue
       rowsum_vars = [vars[y][x] for x in range(WIDTH)]
-      print(f"rowsum[{y}]: {rowsums[y]} = sum({rowsum_vars})")
+      if DBG_CONSTRAINT: print(f"rowsum[{y}]: {rowsums[y]} = sum({rowsum_vars})")
       model.Add(rowsums[y] == sum(rowsum_vars))
+      num_constraints += 1
     for x in range(WIDTH):
       # skip columns with no empty cells
       if sum([1 for y in range(HEIGHT) if board[y][x] == EMPTY]) == 0:
         continue
       colsum_vars = [vars[y][x] for y in range(HEIGHT)]
-      print(f"colsum[{x}]: {colsums[x]} = sum({colsum_vars})")
+      if DBG_CONSTRAINT: print(f"colsum[{x}]: {colsums[x]} = sum({colsum_vars})")
       model.Add(colsums[x] == sum(colsum_vars))
+      num_constraints += 1
+    return num_constraints
 
-  def add_tree_tent_constraints(model, board, trees):
-    # every tree must have at least one tent
-    for y,x in trees:
-      empty_neighbors = []
-      for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
-        if get_cell(board,y+dy,x+dx) == TENT:
-          print(f"tree@{y},{x} has neighboring tent and doesn't need a constraint")
-          break
-        if get_cell(board,y+dy,x+dx) == EMPTY:
-          empty_neighbors.append(vars[y+dy][x+dx])
-      else:
-        if len(empty_neighbors) > 0:
-          model.Add(sum(empty_neighbors) >= 1)  # ignore if a tent is found
-          print(f"tree must be next to tents: {y},{x}: {empty_neighbors} >= 1")
+  def add_tree_tent_constraints(model, board):
+    num_constraints = 0
+    for y in range(HEIGHT):
+      for x in range(WIDTH):
+        if board[y][x] == TREE:
+          empty_neighbors = []
+          for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
+            if get_cell(board,y+dy,x+dx) == TENT:
+              if DBG_CONSTRAINT: print(f"tree@{y},{x} has neighboring tent and doesn't need a constraint")
+              break
+            if get_cell(board,y+dy,x+dx) == EMPTY:
+              empty_neighbors.append(vars[y+dy][x+dx])
+          else:
+            if len(empty_neighbors) == 0:
+              if DBG_CONSTRAINT: print(f"tree@{y},{x} has no neighboring empties tent and doesn't need a constraint")
+              continue
+            model.Add(sum(empty_neighbors) >= 1)  # ignore if a tent is found
+            num_constraints += 1
+            if DBG_CONSTRAINT: print(f"tree must be next to tents: {y},{x}: {empty_neighbors} >= 1")
+    return num_constraints
 
   def add_tent_tent_constraints(model, board):
+    num_constraints = 0
     # no tent can be adjacent to another tent - one tent per 2x2 grid
     for y in range(HEIGHT):
       for x in range(WIDTH):
-        neighbors = [vars[y+dy][x+dx]
-                     for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
-                     if get_cell(board,y+dy,x+dx) in [EMPTY, TENT] ]
-        if len(neighbors) > 1:
-          print(f"no tent adjacency: sum({neighbors} <= 1)")
-          model.Add(sum(neighbors) <= 1)
+        empty_neighbors = [vars[y+dy][x+dx] for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
+                           if get_cell(board,y+dy,x+dx) == EMPTY ]
+        tent_neighbors = [vars[y+dy][x+dx] for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
+                          if get_cell(board,y+dy,x+dx) == TENT ]
+        if len(empty_neighbors) > 1:
+          if DBG_CONSTRAINT: print(f"no tent adjacency: sum(empty_neighbors={empty_neighbors} + tent_neighbors={tent_neighbors} <= 1)")
+          model.Add(sum(empty_neighbors + tent_neighbors) <= 1)
+          num_constraints += 1
+    return num_constraints
 
-  add_rowcol_constraints(model, board, rowsums, colsums)
-  add_tree_tent_constraints(model, board, trees)
-  add_tent_tent_constraints(model, board)
+  num_constraints = 0
+  num_constraints += add_rowcol_constraints(model, board, rowsums, colsums)
+  num_constraints += add_tree_tent_constraints(model, board)
+  num_constraints += add_tent_tent_constraints(model, board)
 
+  print(f"num_constraints={num_constraints}")
   callback = SolutionPrinter(vars, rowsums, colsums)
   solver.parameters.max_time_in_seconds = SOLVER_TIMEOUT
-  solver.parameters.random_seed = int(SEED) if SEED else 1234
+  solver.parameters.random_seed = SEED
   #print(dir(solver.parameters))
-  solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH  #FIXED_SEARCH
+  #solver.parameters.search_branching = cp_model.FIXED_SEARCH  #PORTFOLIO_SEARCH  #FIXED_SEARCH
   status = solver.SearchForAllSolutions(model, callback)
+  #status = solver.SolveWithSolutionCallback(model, callback)  # errors for some reason?
   if status == cp_model.INFEASIBLE:
     print("oops! solver says INFEASIBLE")
     return
