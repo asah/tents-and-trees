@@ -41,35 +41,41 @@ BOARD = []
 for y in range(HEIGHT):
   BOARD.append( [EMPTY] * WIDTH )
 
+def board_height(board):
+  return len(board)
+
+def board_width(board):
+  return len(board[0])
+
 def copy_board(board):
-  return [board[y].copy() for y in range(HEIGHT)]
+  return [board[y].copy() for y in range(board_height(board))]
   
-def copy_board_trees_only():
+def copy_board_trees_only(board=BOARD):
   newboard = []
-  for y in range(HEIGHT):
-    newboard.append( [EMPTY] * WIDTH )
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if BOARD[y][x] == TREE:
+  for y in range(board_height(board)):
+    newboard.append( [EMPTY] * board_width(board) )
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
+      if board[y][x] == TREE:
         newboard[y][x] = TREE
   return newboard
   
-def legal_cell(y,x):
-  return (0 <= y < HEIGHT and 0 <= x < WIDTH)
+def legal_cell(board, y,x):
+  return (0 <= y < board_height(board) and 0 <= x < board_width(board))
 
 def get_cell(board,y,x):
-  if not legal_cell(y,x): return WALL
+  if not legal_cell(board, y,x): return WALL
   return board[y][x]
 
 def frac_filled(board):
   numtrees,numfills = 0,0
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       if board[y][x] == TREE:
         numtrees += 1
       elif board[y][x] != EMPTY:
         numfills += 1
-  return (1.0*numfills) / (HEIGHT * WIDTH - numtrees)
+  return (1.0*numfills) / (board_height(board) * board_width(board) - numtrees)
 
 SQUARE_NEIGHBOR_OFFSETS = [ [-1,0], [0,-1], [0,1], [1,0] ]
 ALL_NEIGHBOR_OFFSETS = [ [-1,-1], [-1,0], [-1,1], [0,-1], [0,1], [1,-1], [1,0], [1,1] ]
@@ -131,49 +137,54 @@ def is_empty_fiveplus_in_col(board, y, x):
   return is_empty_n_in_col(board, y, x, 5, bounded=False)
 
 def has_empty(board):
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       if board[y][x] == EMPTY:
         return True
   return False
 
 def compute_sums(board):
-  rowsums = [0] * HEIGHT
-  colsums = [0] * WIDTH
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if BOARD[y][x] == TENT:
+  rowsums = [0] * board_height(board)
+  colsums = [0] * board_width(board)
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
+      if board[y][x] == TENT:
         colsums[x] += 1
         rowsums[y] += 1
   return rowsums, colsums
 
-def print_board(board, rowsums, colsums):
-  colnums = ''.join([f"{x%10}" for x in range(WIDTH)])
+def print_board(board, rowsums=None, colsums=None):
+  colnums = ''.join([f"{x%10}" for x in range(board_width(board))])
   print(f"cols:   {colnums}")
-  colsumvals = ''.join([f"{int(x/10)}".replace('0',' ') for x in colsums])
-  print(f"sum*10: {colsumvals}")
-  colsumvals = ''.join([f"{x%10}" for x in colsums])
-  print(f"sum* 1: {colsumvals}")
-  for i, y in enumerate(range(HEIGHT)):
-    print(f"{i:>4} {rowsums[y]:>2} {''.join([str(x) for x in board[y]])}")
+  if colsums is not None:
+    colsumvals = ''.join([f"{int(x/10)}".replace('0',' ') for x in colsums])
+    print(f"sum*10: {colsumvals}")
+    colsumvals = ''.join([f"{x%10}" for x in colsums])
+    print(f"sum* 1: {colsumvals}")
+  for i, y in enumerate(range(len(board))):
+    print(f"{i:>4} {'' if rowsums is None else rowsums[y]:>2} {''.join([str(x) for x in board[y]])}")
   print("")
 
-def print_vars(vars_array, rowsums, colsums):
-  print(f"    {' '.join([str(x) for x in colsums])}")
-  for y in range(HEIGHT):
-    #print(f"{rowsums[y]:>3} {''.join([re.sub(r'y.+', '?', str(x))+' ' for x in vars_array[y]])}")
-    print(f"{rowsums[y]:>3} {''.join([str(x)+' ' for x in vars_array[y]])}")
+def print_vars(board, vars_array, rowsums=None, colsums=None):
+  colnums = ''.join([f"{x%10}" for x in range(board_width(board))])
+  if colsums is not None:
+    colsumvals = ''.join([f"{int(x/10)}".replace('0',' ') for x in colsums])
+    print(f"sum*10: {colsumvals}")
+    colsumvals = ''.join([f"{x%10}" for x in colsums])
+    print(f"sum* 1: {colsumvals}")
+  for y in range(len(vars_array)):
+    print(f"{'' if rowsums is None else rowsums[y]:>3} {''.join([str(x)+' ' for x in vars_array[y]])}")
   print("")
 
 
 def solver_setup(board):
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       if board[y][x] not in [TREE, EMPTY]:
         board[y][x] = EMPTY
   # add grass if cell not adjacent to tree
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       if board[y][x] == EMPTY:
         for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
           if get_cell(board,y+dy,x+dx) == TREE:
@@ -183,8 +194,8 @@ def solver_setup(board):
 
 def does_solution_match(board, expected_board, rowsums, colsums, print_mismatches=False, exit_on_mismatch=False):
   mismatches = 0
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       cell = board[y][x]
       # ignore mismatches of grass vs empty
       if (cell in [TREE, TENT] and cell != expected_board[y][x]) or \
@@ -201,10 +212,10 @@ def does_solution_match(board, expected_board, rowsums, colsums, print_mismatche
   
 def check_solution(board, expected_rowsums, expected_colsums):
   numtrees = numtents = 0
-  rowsums = [0] * HEIGHT
-  colsums = [0] * WIDTH
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  rowsums = [0] * board_height(board)
+  colsums = [0] * board_width(board)
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       if board[y][x] == TREE:
         numtrees += 1
       elif board[y][x] == TENT:
@@ -215,10 +226,10 @@ def check_solution(board, expected_rowsums, expected_colsums):
   errors = []
   if numtrees != numtents:
     errors.append(f"error: {numtrees} trees but {numtents} tents.")
-  for y in range(HEIGHT):
+  for y in range(board_height(board)):
     if rowsums[y] != expected_rowsums[y]:
       errors.append(f"error: row {y} has {rowsums[y]} trees but expected {expected_rowsums[y]}.")
-  for x in range(WIDTH):
+  for x in range(board_width(board)):
     if colsums[x] != expected_colsums[x]:
       errors.append(f"error: col {x} has {colsums[x]} trees but expected {expected_colsums[x]}.")
   if len(errors) != 0:
@@ -231,16 +242,16 @@ def is_one_tree_per_tent(board):
   tent_for_tree_vars = []
   tentidx = []
   cur_tent_idx = 0
-  for y in range(HEIGHT):
-    tentidx.append( [0] * WIDTH )
-    for x in range(WIDTH):
+  for y in range(board_height(board)):
+    tentidx.append( [0] * board_width(board) )
+    for x in range(board_width(board)):
       if board[y][x] == TENT:
         tentidx[y][x] = cur_tent_idx
         cur_tent_idx += 1
 
-  #print_board(board, [' ']*HEIGHT, [' ']*WIDTH)
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
+  #print_board(board, [' ']*board_height(board), [' ']*board_width(board))
+  for y in range(board_height(board)):
+    for x in range(board_width(board)):
       if board[y][x] == TREE:
         # NewIntVarFromDomain wants domains: https://github.com/google/or-tools/blob/master/ortools/sat/python/cp_model.py#L718
         adjacent_tent_idxs = [tentidx[y+dy][x+dx] for dy,dx in SQUARE_NEIGHBOR_OFFSETS if get_cell(board, y+dy, x+dx) == TENT]
@@ -269,47 +280,64 @@ def is_one_tree_per_tent(board):
 class SolutionPrinter(cp_model.CpSolverSolutionCallback):
   """Print intermediate solutions."""
 
-  def __init__(self, variables, rowsums, colsums):
+  def __init__(self, board, variables):
     cp_model.CpSolverSolutionCallback.__init__(self)
+    self.__board = board
     self.__variables = variables
     self.__solnboards = []
-    self.__rowsums = rowsums
-    self.__colsums = colsums
 
   def SolutionBoards(self):
     return self.__solnboards
 
   def OnSolutionCallback(self):
-    soln_board = copy_board_trees_only()
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
-        if soln_board[y][x] != TREE:
-          soln_board[y][x] = TENT if self.Value(self.__variables[y][x]) == 1 else GRASS
+    board = copy_board_trees_only(self.__board)
+    for y in range(board_height(board)):
+      for x in range(board_width(board)):
+        if board[y][x] != TREE:
+          board[y][x] = TENT if self.Value(self.__variables[y][x]) == 1 else GRASS
     print(".", end='', flush=True)
     if is_one_tree_per_tent(soln_board):
       print(" found solution - stopping.")
-      self.__solnboards.append(soln_board)
+      self.__solnboards.append(board)
       self.StopSearch()
 
   def SolutionCount(self):
     return len(self.__solnboards)
 
 def ortools_cpsat_solver(board, rowsums, colsums):
-  model = cp_model.CpModel()
-  solver = cp_model.CpSolver()
   rowsum_vars = []
-  for y in range(HEIGHT):
+  for y in range(board_height(board)):
     rowsum_vars.append([])
   colsum_vars = []
-  for x in range(WIDTH):
+  for x in range(board_width(board)):
     colsum_vars.append([])
-  vars_added = {}
-  vars = []
-  for y in range(HEIGHT):
-    vars.append( [None] * WIDTH )
 
   print("board after setup:")
   print_board(board, rowsums, colsums)
+
+  # row and column sums must add up
+  def create_vars(model, board):
+    vars = []
+    for y in range(board_height(board)):
+      vars.append([])
+      for x in range(board_width(board)):
+        if board[y][x] == EMPTY:
+          vars[y].append(model.NewIntVar(0, 1, f"y{y}x{x}"))
+        elif board[y][x] == GRASS:
+          vars[y].append(model.NewConstant(0)) # NewIntVar(0, 0, varname)
+        elif board[y][x] == TENT:
+          vars[y].append(model.NewConstant(1)) # NewIntVar(1, 1, varname)
+        elif board[y][x] == TREE:
+          vars[y].append(model.NewConstant(0)) # NewIntVar(0, 0, varname)
+        elif board[y][x] == WALL:
+          # ignore WALL, e.g. for miniboards
+          vars[y].append(None)
+          pass
+        else:
+          print(f"ERROR: unknown board state @ {y},{x}: {board[y][x]}")
+          sys.exit(1)
+    print_vars(board, vars, rowsums, colsums)
+    return vars
 
   # didn't use a decorator because I want to define and call at once
   def accelerator(msg, func):
@@ -322,11 +350,13 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     return False
 
   def place_grass(board, y, x, msg=None):
+    # note: not for use on mini-boards bec of does_solution_match() call
     board[y][x] = GRASS
     print(f"placed grass on {y:2},{x:2}{(': '+msg) if msg else ''}")
     does_solution_match(board, BOARD, rowsums, colsums, True, True)
     return True
   def place_tent(board, y, x, msg=None):
+    # note: not for use on mini-boards bec of does_solution_match() call
     board[y][x] = TENT
     print(f"placed  tent on {y:2},{x:2}{(': '+msg) if msg else ''}")
     does_solution_match(board, BOARD, rowsums, colsums, True, True)
@@ -334,41 +364,140 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     return True
 
   def grass_on_zero_remaining(board, rowsums, colsums, changed=False):
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
+    for y in range(board_height(board)):
+      for x in range(board_width(board)):
         if board[y][x] != EMPTY: continue
         if colsums[x] == 0:
           changed |= place_grass(board, y, x, f"grass_on_zero_remaining: colsum[{x}]=0")
         if rowsums[y] == 0:
           changed |= place_grass(board, y, x, f"grass_on_zero_remaining: rowsum[{y}]=0")
     # if no remaining, then grass over remaining cells in the row
-    for y in range(HEIGHT):
+    for y in range(board_height(board)):
       numtents = 0
-      for x in range(WIDTH):
+      for x in range(board_width(board)):
         if board[y][x] == TENT:
           numtents += 1
       if numtents == rowsums[y]:
-        for x in range(WIDTH):
+        for x in range(board_width(board)):
           if board[y][x] == EMPTY:
             changed |= place_grass(board, y, x, f"grass_on_zero_remaining: numtents={numtents} rowsum[{y}]={rowsums[y]}")
     # if no remaining, then grass over remaining cells in the column
-    for x in range(WIDTH):
+    for x in range(board_width(board)):
       numtents = 0
-      for y in range(HEIGHT):
+      for y in range(board_height(board)):
         if board[y][x] == TENT:
           numtents += 1
       if numtents == colsums[x]:
-        for y in range(HEIGHT):
+        for y in range(board_height(board)):
           if board[y][x] == EMPTY:
             changed |= place_grass(board, y, x, f"grass_on_zero_remaining: numtents={numtents} colsum[{x}]={colsums[x]}")
     return changed
 
+  def add_tree_tent_constraints(model, board, vars):
+    num_constraints = 0
+    for y in range(len(board)):
+      for x in range(len(board[0])):
+        if board[y][x] == TREE:
+          empty_neighbors = []
+          for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
+            if get_cell(board,y+dy,x+dx) == TENT:
+              if DBG_CONSTRAINT: print(f"tree@{y},{x} has neighboring tent and doesn't need a constraint")
+              break
+            if get_cell(board,y+dy,x+dx) == EMPTY:
+              empty_neighbors.append(vars[y+dy][x+dx])
+          else:
+            if len(empty_neighbors) == 0:
+              if DBG_CONSTRAINT: print(f"tree@{y},{x} has no neighboring empties tent and doesn't need a constraint")
+              continue
+            model.Add(sum(empty_neighbors) >= 1)  # ignore if a tent is found
+            num_constraints += 1
+            if DBG_CONSTRAINT: print(f"tree must be next to tents: {y},{x}: {empty_neighbors} >= 1")
+    return num_constraints
+
+  def add_tent_tent_constraints(model, board, vars):
+    num_constraints = 0
+    # no tent can be adjacent to another tent - one tent per 2x2 grid
+    for y in range(len(board)):
+      for x in range(len(board[0])):
+        empty_neighbors = [vars[y+dy][x+dx] for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
+                           if get_cell(board,y+dy,x+dx) == EMPTY ]
+        tent_neighbors = [vars[y+dy][x+dx] for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
+                          if get_cell(board,y+dy,x+dx) == TENT ]
+        if len(empty_neighbors) > 1:
+          if DBG_CONSTRAINT: print(f"no tent adjacency: sum(empty_neighbors={empty_neighbors} + tent_neighbors={tent_neighbors} <= 1)")
+          model.Add(sum(empty_neighbors + tent_neighbors) <= 1)
+          num_constraints += 1
+    return num_constraints
+
+  def solve_miniboards(board, rowsums, columns, changed=False):
+    # look at a smaller subset of the board and see if there's only one possible solution
+    # (obviously, we don't have colsums/rowsums but we still have adjacency rules)
+    for y in [4*i for i in range(int(board_height(board) / 4))]:  # every Nth
+      for x in [4*i for i in range(int(board_width(board) / 4))]:  # every Nth
+        minimodel = cp_model.CpModel()
+        minisolver = cp_model.CpSolver()
+        def ncell(y,x):  # neighboring cell
+          return WALL if get_cell(board,y,x) == WALL else EMPTY
+        # surround the miniboard with the neighboring cells, to avoid the fatally-bad assumption that they're walls
+        # TODO: breaks code... need to actually shrink the board on the side(s) with walls...
+        miniboard = [ [ ncell(y-1,x-1), ncell(y-1,x+0), ncell(y-1,x+1), ncell(y-1,x+2), ncell(y-1,x+3), ncell(y-1,x+4) ],
+                      [ ncell(y+0,x-1), board[y+0][x+0], board[y+0][x+1], board[y+0][x+2], board[y+0][x+3], ncell(y+0,x+4) ],
+                      [ ncell(y+1,x-1), board[y+1][x+0], board[y+1][x+1], board[y+1][x+2], board[y+1][x+3], ncell(y+1,x+4) ],
+                      [ ncell(y+2,x-1), board[y+2][x+0], board[y+2][x+1], board[y+2][x+2], board[y+2][x+3], ncell(y+2,x+4) ],
+                      [ ncell(y+3,x-1), board[y+3][x+0], board[y+3][x+1], board[y+3][x+2], board[y+3][x+3], ncell(y+3,x+4) ],
+                      [ ncell(y+4,x-1), ncell(y+4,x+0), ncell(y+4,x+1), ncell(y+4,x+2), ncell(y+4,x+3), ncell(y+4,x+4) ] ]
+        minivars = create_vars(minimodel, miniboard)
+        print(f"miniboard: 4x4 @ {y},{x}")
+        print_board(miniboard)
+        add_tree_tent_constraints(minimodel, miniboard, minivars)
+        add_tent_tent_constraints(minimodel, miniboard, minivars)
+        callback = SolutionPrinter(miniboard, minivars)
+        status = minisolver.SearchForAllSolutions(minimodel, callback)
+        if status == cp_model.INFEASIBLE:
+          print("oops! miniboard solver says INFEASIBLE")
+          return
+        if status == cp_model.MODEL_INVALID:
+          print("oops! miniboard solver says MODEL_INVALID")
+          return
+        if status == cp_model.UNKNOWN:
+          print("oops! miniboard solver says UNKNOWN / timeout")
+          return
+        for dy in range(4):
+          for dx in range(4):
+            if board[y+dy][x+dx] != EMPTY:
+              continue
+            miniboards = callback.SolutionBoards()
+            for miniboard in miniboards[1:]:
+              if miniboard[dy][dx] != miniboards[0][dy][dx]:
+                break
+            else:
+              # on every board, the value is the same
+              if miniboards[0][dy][dx] == GRASS:
+                changed |= place_grass(board, y+dy, x+dx, msg="placing grass - all 4x4 miniboard solutions demand it.")
+              elif miniboards[0][dy][dx] == TENT:
+                changed |= place_tent(board, y+dy, x+dx, msg="placing tent - all 4x4 miniboard solutions demand it.")
+    return changed
+  
+  def solve_rowcol_subsets(board, rowsums, columns, changed=False):
+    # look at 2-3 rows/columns at once and see if they have only one solution.
+    # (we have either colsums or rowsums but not both, and still have adjacency rules)
+    for y in range(board_height(board)-1):
+      valcounts = {EMPTY: 0, TREE: 0, TENT: 0, GRASS: 0, WALL: 0}
+      for x in range(board_width(board)):
+        valcounts[get_cell(board, y, x)] += 1
+        valcounts[get_cell(board, y+1, x)] += 1
+      # 2x2 can only house one
+      if valcounts[EMPTY] + valcounts[TENT] == rowsums[y] + rowsums[y+1]:
+        print(f"TODO: fill two rows: valcounts[{valcounts[EMPTY] + valcounts[TENT]}: EMPTY={valcounts[EMPTY]} + TENT={valcounts[TENT]}] ?=? rowsums[{y}-{y+1}]={rowsums[y] + rowsums[y+1]}: {rowsums[y]} & {rowsums[y+1]}]")
+        print(f"yep, I'd fill that.")
+    return changed
+  
   def grass_around_trees_with_assigned_tents(board, rowsums, columns, changed=False):
     # SEED=9860347 SIZE=24x24
     # placed grass on 12, 0: grassing around assigned tree @13,0
     # placed grass on 20, 0: grassing around assigned tree @21,0
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
+    for y in range(board_height(board)):
+      for x in range(board_width(board)):
         if board[y][x] != TREE:
           break
         # tree must have exactly one tent neighbor (TODO: remove this limitation?)
@@ -389,8 +518,8 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     return changed
           
   def grass_on_right_angles(board, rowsums, columns, changed=False):
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
+    for y in range(board_height(board)):
+      for x in range(board_width(board)):
         if board[y][x] == TREE:
           if (get_cell(board, y, x-1) == EMPTY and get_cell(board, y-1, x) == EMPTY and \
               get_cell(board, y, x+1) != EMPTY and get_cell(board, y+1, x) != EMPTY and \
@@ -411,9 +540,9 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     return changed
 
   def fill_singles_if_sums_match(board, rowsums, columns, changed=False):
-    for y in range(HEIGHT):
+    for y in range(board_height(board)):
       empty_singles, empty_doubles, empty_triples, empty_quads, tents = [], [], [], [], []
-      for x in range(WIDTH):
+      for x in range(board_width(board)):
         if board[y][x] == TENT:
           tents.append(x)
         elif is_empty_single_in_row(board, y, x):
@@ -453,9 +582,9 @@ def ortools_cpsat_solver(board, rowsums, colsums):
               if get_cell(board, y+dy, x+dx) == EMPTY:
                 changed |= place_grass(board, y+dy, x+dx, f"fill adjacent-to-triples in row @{y}")
     #if changed: print_board(board, rowsums, colsums)
-    for x in range(HEIGHT):
+    for x in range(board_height(board)):
       empty_singles, empty_doubles, empty_triples, empty_quads, tents = [], [], [], [], []
-      for y in range(WIDTH):
+      for y in range(board_width(board)):
         if board[y][x] == TENT:
           tents.append(y)
         elif is_empty_single_in_col(board, y, x):
@@ -508,16 +637,16 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     return changed
 
   def grass_around_tents(board, rowsums, columns, changed=False):
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
+    for y in range(board_height(board)):
+      for x in range(board_width(board)):
         if board[y][x] == TENT:
           changed |= grass_around_tent(board, y, x)
     return changed
 
   def place_tent_next_to_lonely_trees(board, rowsums, columns, changed=False):
     # lonely = one empty cell available = empty must be a tent
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
+    for y in range(board_height(board)):
+      for x in range(board_width(board)):
         if board[y][x] == TREE:
           empty_cell = None
           for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
@@ -532,17 +661,23 @@ def ortools_cpsat_solver(board, rowsums, colsums):
               changed |= place_tent(board, empty_cell[0], empty_cell[1], f"place tent next to lonely trees")
     return changed
 
-  while True:
-    if not ( # changed...
-        accelerator("put grass on cells with zero remaining", grass_on_zero_remaining) or
-        accelerator("fill singles if count matches rowsums", fill_singles_if_sums_match) or
-        accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees) or
-        accelerator("put grass around tents", grass_around_tents) or
-        accelerator("grass in the diagonal of a tree with right-angle empties", grass_on_right_angles) or
-        accelerator("grass around assigned tents", grass_around_trees_with_assigned_tents) or
-        False):
-      break
+  def deductive_solver():
+    while True:
+      if not ( # changed...
+          accelerator("put grass on cells with zero remaining", grass_on_zero_remaining) or
+          accelerator("fill singles if count matches rowsums", fill_singles_if_sums_match) or
+          accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees) or
+          accelerator("put grass around tents", grass_around_tents) or
+          accelerator("grass in the diagonal of a tree with right-angle empties", grass_on_right_angles) or
+          accelerator("grass around assigned tents", grass_around_trees_with_assigned_tents) or
+          #accelerator("try solving rowcol subsets", solve_rowcol_subsets) or
+          False):
+        break
 
+  deductive_solver()
+  #while solve_miniboards(board, rowsums, colsums):
+  #  deductive_solver()
+      
   if not has_empty(board):
     if not is_one_tree_per_tent(board):
       print("error! after accelerator - is_one_tree_per_tent(board) == False")
@@ -553,83 +688,37 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     print("success! after accelerator - but it doesn't match (new solution)")
     sys.exit(0)
   
-  # row and column sums must add up
-  for y in range(HEIGHT):
-    for x in range(WIDTH):
-      if board[y][x] == EMPTY:
-        vars[y][x] = model.NewIntVar(0, 1, f"y{y}x{x}")
-      elif board[y][x] == GRASS:
-        vars[y][x] = model.NewConstant(0) # NewIntVar(0, 0, varname)
-      elif board[y][x] == TENT:
-        vars[y][x] = model.NewConstant(1) # NewIntVar(1, 1, varname)
-      elif board[y][x] == TREE:
-        vars[y][x] = model.NewConstant(0) # NewIntVar(0, 0, varname)
-  print_vars(vars, rowsums, colsums)
-
   #print_board(board, rowsums, colsums)
-  def add_rowcol_constraints(model, board, rowsums, colsums):
+  def add_rowcol_constraints(model, board, rowsums, colsums, vars):
     num_constraints = 0
-    for y in range(HEIGHT):
+    for y in range(board_height(board)):
       # skip rows with no empty cells
-      if sum([1 for x in range(WIDTH) if board[y][x] == EMPTY]) == 0:
+      if sum([1 for x in range(board_width(board)) if board[y][x] == EMPTY]) == 0:
         continue
-      rowsum_vars = [vars[y][x] for x in range(WIDTH)]
+      rowsum_vars = [vars[y][x] for x in range(board_width(board))]
       if DBG_CONSTRAINT: print(f"rowsum[{y}]: {rowsums[y]} = sum({rowsum_vars})")
       model.Add(rowsums[y] == sum(rowsum_vars))
       num_constraints += 1
-    for x in range(WIDTH):
+    for x in range(board_width(board)):
       # skip columns with no empty cells
-      if sum([1 for y in range(HEIGHT) if board[y][x] == EMPTY]) == 0:
+      if sum([1 for y in range(board_height(board)) if board[y][x] == EMPTY]) == 0:
         continue
-      colsum_vars = [vars[y][x] for y in range(HEIGHT)]
+      colsum_vars = [vars[y][x] for y in range(board_height(board))]
       if DBG_CONSTRAINT: print(f"colsum[{x}]: {colsums[x]} = sum({colsum_vars})")
       model.Add(colsums[x] == sum(colsum_vars))
       num_constraints += 1
     return num_constraints
 
-  def add_tree_tent_constraints(model, board):
-    num_constraints = 0
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
-        if board[y][x] == TREE:
-          empty_neighbors = []
-          for dy,dx in SQUARE_NEIGHBOR_OFFSETS:
-            if get_cell(board,y+dy,x+dx) == TENT:
-              if DBG_CONSTRAINT: print(f"tree@{y},{x} has neighboring tent and doesn't need a constraint")
-              break
-            if get_cell(board,y+dy,x+dx) == EMPTY:
-              empty_neighbors.append(vars[y+dy][x+dx])
-          else:
-            if len(empty_neighbors) == 0:
-              if DBG_CONSTRAINT: print(f"tree@{y},{x} has no neighboring empties tent and doesn't need a constraint")
-              continue
-            model.Add(sum(empty_neighbors) >= 1)  # ignore if a tent is found
-            num_constraints += 1
-            if DBG_CONSTRAINT: print(f"tree must be next to tents: {y},{x}: {empty_neighbors} >= 1")
-    return num_constraints
-
-  def add_tent_tent_constraints(model, board):
-    num_constraints = 0
-    # no tent can be adjacent to another tent - one tent per 2x2 grid
-    for y in range(HEIGHT):
-      for x in range(WIDTH):
-        empty_neighbors = [vars[y+dy][x+dx] for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
-                           if get_cell(board,y+dy,x+dx) == EMPTY ]
-        tent_neighbors = [vars[y+dy][x+dx] for dy,dx in TWOBYTWO_NEIGHBOR_OFFSETS
-                          if get_cell(board,y+dy,x+dx) == TENT ]
-        if len(empty_neighbors) > 1:
-          if DBG_CONSTRAINT: print(f"no tent adjacency: sum(empty_neighbors={empty_neighbors} + tent_neighbors={tent_neighbors} <= 1)")
-          model.Add(sum(empty_neighbors + tent_neighbors) <= 1)
-          num_constraints += 1
-    return num_constraints
-
+  model = cp_model.CpModel()
+  vars = create_vars(model, board)
   num_constraints = 0
-  num_constraints += add_rowcol_constraints(model, board, rowsums, colsums)
-  num_constraints += add_tree_tent_constraints(model, board)
-  num_constraints += add_tent_tent_constraints(model, board)
+  num_constraints += add_rowcol_constraints(model, board, rowsums, colsums, vars)
+  num_constraints += add_tree_tent_constraints(model, board, vars)
+  num_constraints += add_tent_tent_constraints(model, board, vars)
 
   print(f"num_constraints={num_constraints}")
-  callback = SolutionPrinter(vars, rowsums, colsums)
+  solver = cp_model.CpSolver()
+  callback = SolutionPrinter(board, vars)
   solver.parameters.max_time_in_seconds = SOLVER_TIMEOUT
   solver.parameters.random_seed = SEED
   #print(dir(solver.parameters))
@@ -683,20 +772,7 @@ check_solution(BOARD, ROWSUMS, COLSUMS)
 print_board(BOARD, ROWSUMS, COLSUMS)
 
 SOLVER_BOARD = copy_board_trees_only()
-#print_board(SOLVER_BOARD, ROWSUMS, COLSUMS)
-#solver_setup(SOLVER_BOARD)
-#check_solution(SOLVER_BOARD, ROWSUMS, COLSUMS)
-#brute_force_solver(SOLVER_BOARD)
-
 solver_setup(SOLVER_BOARD)
-#print_board(SOLVER_BOARD, ROWSUMS, COLSUMS)
 
 print("running the solver...")
-
-#constraint_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
-
 ortools_cpsat_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
-
-#ortools_assignment_solver(SOLVER_BOARD, ROWSUMS, COLSUMS)
-
-
