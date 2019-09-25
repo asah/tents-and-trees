@@ -23,6 +23,8 @@ if DENSITY < 0.1 or DENSITY > 1.0:
 SOLVER_TIMEOUT = float(os.environ.get('TIMEOUT', '100.0').strip())
 
 DBG_CONSTRAINT = int(os.environ.get('DBG_CONSTRAINT', '0'))
+DBG_PRINT_MISMATCHES = int(os.environ.get('DBG_PRINT_MISMATCHES', '1'))
+ALLOW_SOLUTION_MISMATCH = int(os.environ.get('ALLOW_SOLUTION_MISMATCH', '0'))
 
 SEED = int(os.environ.get('SEED', random.randint(0, 9999999)))
 print(f"SEED={SEED}")
@@ -137,6 +139,14 @@ def has_empty(board):
         return True
   return False
 
+def num_empty(board):
+  empty = 0
+  for y in range(HEIGHT):
+    for x in range(WIDTH):
+      if board[y][x] == EMPTY:
+        empty += 1
+  return empty
+
 def compute_sums(board):
   rowsums = [0] * HEIGHT
   colsums = [0] * WIDTH
@@ -181,7 +191,7 @@ def solver_setup(board):
         else: # break not reached i.e. tree not found
           board[y][x] = GRASS
 
-def does_solution_match(board, expected_board, rowsums, colsums, print_mismatches=False, exit_on_mismatch=False):
+def does_solution_match(board, expected_board, rowsums, colsums, print_mismatches=True):
   mismatches = 0
   for y in range(HEIGHT):
     for x in range(WIDTH):
@@ -189,12 +199,13 @@ def does_solution_match(board, expected_board, rowsums, colsums, print_mismatche
       # ignore mismatches of grass vs empty
       if (cell in [TREE, TENT] and cell != expected_board[y][x]) or \
          (cell == GRASS and expected_board[y][x] == TENT):
-        if print_mismatches:
+        if DBG_PRINT_MISMATCHES and print_mismatches:
           print(f"mismatch at {y},{x}: {board[y][x]} vs {expected_board[y][x]}")
           print_board(board, rowsums, colsums)
           print_board(expected_board, rowsums, colsums)
         mismatches += 1
-  if exit_on_mismatch and mismatches > 0:
+  if not ALLOW_SOLUTION_MISMATCH and mismatches > 0:
+    print(f"mismatch(es) found: exiting with error...")
     sys.exit(1)
   return (mismatches == 0)
 
@@ -316,7 +327,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
     if func(board, rowsums, colsums):
       print(f"board after accelerator ({100.0*frac_filled(board):.1f}%): {msg}")
       print_board(board, rowsums, colsums)
-      does_solution_match(board, BOARD, rowsums, colsums, True, True)
+      does_solution_match(board, BOARD, rowsums, colsums)
       return True
     print(f"no change after accelerator: {msg}")
     return False
@@ -324,12 +335,12 @@ def ortools_cpsat_solver(board, rowsums, colsums):
   def place_grass(board, y, x, msg=None):
     board[y][x] = GRASS
     print(f"placed grass on {y:2},{x:2}{(': '+msg) if msg else ''}")
-    does_solution_match(board, BOARD, rowsums, colsums, True, True)
+    does_solution_match(board, BOARD, rowsums, colsums)
     return True
-  def place_tent(board, y, x, msg=None):
+  def place_tent(board, y, x, msg=None, allow_mismatches=False):
     board[y][x] = TENT
     print(f"placed  tent on {y:2},{x:2}{(': '+msg) if msg else ''}")
-    does_solution_match(board, BOARD, rowsums, colsums, True, True)
+    does_solution_match(board, BOARD, rowsums, colsums)
     grass_around_tent(board, y, x)
     return True
 
@@ -531,6 +542,31 @@ def ortools_cpsat_solver(board, rowsums, colsums):
             if empty_cell is not None:
               changed |= place_tent(board, empty_cell[0], empty_cell[1], f"place tent next to lonely trees")
     return changed
+
+  global ALLOW_SOLUTION_MISMATCH, DBG_PRINT_MISMATCHES
+  ALLOW_SOLUTION_MISMATCH = True
+  save_DBG_PRINT_MISMATCHES = DBG_PRINT_MISMATCHES
+  DBG_PRINT_MISMATCHES = False
+  while True:
+    accelerator("put grass on cells with zero remaining", grass_on_zero_remaining)
+    accelerator("fill singles if count matches rowsums", fill_singles_if_sums_match)
+    accelerator("place tents next to trees with one empty cell", place_tent_next_to_lonely_trees)
+    accelerator("put grass around tents", grass_around_tents)
+    accelerator("grass in the diagonal of a tree with right-angle empties", grass_on_right_angles)
+    accelerator("grass around assigned tents", grass_around_trees_with_assigned_tents)
+    empties = []
+    for y in range(HEIGHT):
+      for x in range(WIDTH):
+        if board[y][x] == EMPTY:
+          empties.append([y,x])
+    if len(empties) == 0:
+      break
+    rand_empty = random.choice(empties)
+    board[rand_empty[0]][rand_empty[1]] = TENT if random.random() < DENSITY else GRASS
+    print(f"randomly set {rand_empty[0]},{rand_empty[1]} to {board[rand_empty[0]][rand_empty[1]]}")
+  ALLOW_SOLUTION_MISMATCH = False
+  DBG_PRINT_MISMATCHES = save_DBG_PRINT_MISMATCHES
+  sys.exit(0)
 
   while True:
     if not ( # changed...
