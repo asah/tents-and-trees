@@ -721,12 +721,18 @@ def ortools_cpsat_solver(board, rowsums, colsums):
           num_constraints += 1
     return num_constraints
 
+  num_empties = 0
+  for y in range(HEIGHT):
+    for x in range(WIDTH):
+      if board[y][x] == EMPTY:
+        num_empties += 1
   num_constraints = 0
   num_constraints += add_rowcol_constraints(model, board, rowsums, colsums)
   num_constraints += add_tree_tent_constraints(model, board)
   num_constraints += add_tent_tent_constraints(model, board)
-
-  print(f"num_constraints={num_constraints}")
+  # estimate number of boards by guessing that each decision forces an avg of 3 cells
+  print(f"num_constraints={num_constraints}, num_empties={num_empties}, estd_possible_boards={(2**(num_empties/3)):.2}")
+  
   start_ts = time.time()
   callback = SolutionPrinter(vars, rowsums, colsums)
   solver.parameters.max_time_in_seconds = SOLVER_TIMEOUT
