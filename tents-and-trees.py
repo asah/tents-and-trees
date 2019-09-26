@@ -1,5 +1,18 @@
-# to run
-# while [ 1 ]; do BOARD=24x24 python3 tents-and-trees.py > output.txt; status=$?; egrep 'SEED|success|oops' output.txt; if [ $status -ne 0 ]; then break; fi; done
+#!python3
+# solver for tents and trees: https://www.google.com/search?q=tents+and+trees+puzzle
+# 
+# basic run:
+# SIZE=24x24 python3 tents-and-trees.py
+#
+# set random seed for reproducibility (see first line of output from basic for the random seed chosen)
+# SEED=123 SIZE=24x24 python3 tents-and-trees.py
+#
+# test for errors (randomly)
+# while [ 1 ]; do SIZE=24x24 python3 tents-and-trees.py > output.txt; status=$?; egrep 'SEED|success|oops' output.txt; if [ $status -ne 0 ]; then break; fi; done
+#
+# how often can we solve deductively (vs needing to use the SAT solver)
+# for i in `seq 1 100`; do SIZE=24x24 python3 tents-and-trees.py > output.txt; status=$?; egrep 'SEED|success|oops' output.txt; if [ $status -ne 0 ]; then break; fi; done | egrep -c 'success. after accelerator'
+#
 
 import os, sys, re, random, time
 import constraint
