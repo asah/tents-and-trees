@@ -13,6 +13,8 @@
 # how often can we solve deductively (vs needing to use the SAT solver)
 # for i in `seq 1 100`; do SIZE=24x24 python3 tents-and-trees.py > output.txt; status=$?; egrep 'SEED|success|oops' output.txt; if [ $status -ne 0 ]; then break; fi; done | egrep -c 'success. after accelerator'
 #
+# discover new patterns to code - manually ignore symmetric sub-boards that require a solver, of course
+# for i in {1..100}; do SIZE=8x8 python3 tents-and-trees.py >> output.txt; done; grep -B 23 "valid solution" output.txt
 
 import os, sys, re, random, time
 import constraint
@@ -49,6 +51,8 @@ WALL='w'
 TREE='T'
 TENT='t'
 GRASS='g'
+HIDDEN_TREE='H'
+HIDDEN_TENT='h'
 
 BOARD = []
 for y in range(HEIGHT):
@@ -178,6 +182,13 @@ def compute_sums(board):
         colsums[x] += 1
         rowsums[y] += 1
   return rowsums, colsums
+
+def recompute_sums(board, rowsums, colsums):
+  rsum,csum = compute_sums(board)
+  for y in HEIGHT:
+    rowsums[x] = rsum[y]
+  for x in HEIGHT:
+    colsums[x] = rsum[x]
 
 def print_board(board, rowsums, colsums):
   colnums = ''.join([f"{x%10}" for x in range(WIDTH)])
@@ -347,6 +358,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
 
   # didn't use a decorator because I want to define and call at once
   def accelerator(msg, func):
+    """accelerates the thereom proving process with deductive logic."""
     if func(board, rowsums, colsums):
       print(f"board after accelerator ({100.0*frac_filled(board):.1f}%): {msg}")
       print_board(board, rowsums, colsums)
@@ -601,8 +613,33 @@ def ortools_cpsat_solver(board, rowsums, colsums):
         accelerator("grass in the diagonal of a tree with right-angle empties", grass_on_right_angles) or
         accelerator("grass around assigned tents", grass_around_trees_with_assigned_tents) or
         accelerator("grass empties next to assigned trees", grass_lonely_empties) or
-          False):
-      break
+        False):
+      # no changes - try deleting assigned trees, uncovering empties
+      # SEED=7272678 SIZE=8x8 /usr/local/bin/python3 tents-and-trees.py
+      found_assigned_trees = False
+      for y in range(HEIGHT):
+        for x in range(WIDTH):
+          if board[y][x] == TREE and num_adjacent(board,y,x,TENT) == 1:
+            hidden_tent = adjacent(board,y,x,TENT)[0]
+            board[y][x] = HIDDEN_TREE
+            ty,tx = hidden_tent[0], hidden_tent[1]
+            board[ty][tx] = HIDDEN_TENT
+            print(f"hiding tree @ {y},{x} and assigned tent at {ty},{tx}; adjusting sums")
+            found_assigned_trees = True
+            rowsums[ty] -= 1
+            colsums[tx] -= 1
+      if not found_assigned_trees:
+        # restore hidden tents and trees
+        for y in range(HEIGHT):
+          for x in range(WIDTH):
+            if board[y][x] == HIDDEN_TREE:
+              board[y][x] = TREE
+            elif board[y][x] == HIDDEN_TENT:
+              board[y][x] = TENT
+              rowsums[y] += 1
+              colsums[x] += 1
+        print_board(board, rowsums, colsums)
+        break
 
   if not has_empty(board):
     if not is_one_tree_per_tent(board):
@@ -690,6 +727,7 @@ def ortools_cpsat_solver(board, rowsums, colsums):
   num_constraints += add_tent_tent_constraints(model, board)
 
   print(f"num_constraints={num_constraints}")
+  start_ts = time.time()
   callback = SolutionPrinter(vars, rowsums, colsums)
   solver.parameters.max_time_in_seconds = SOLVER_TIMEOUT
   solver.parameters.random_seed = SEED
@@ -716,10 +754,12 @@ def ortools_cpsat_solver(board, rowsums, colsums):
       print("skipping solution that violates no-sharing...\n")
       continue
     if does_solution_match(soln_board, BOARD, rowsums, colsums):
-      print("success! valid solution, and it matches.")
+      elapsed_secs = time.time() - start_ts
+      print(f"success! valid solution, and it matches. {elapsed_secs:.2f} secs")
       sys.exit(0)
     else:
-      print("success! valid solution, but it doesn't match (new solution)...")
+      elapsed_secs = time.time() - start_ts
+      print("success! valid solution, but it doesn't match (new solution)... {elapsed_secs:.2f} secs")
       print_board(soln_board, rowsums, colsums)
       print("expected:")
       print_board(BOARD, rowsums, colsums)
